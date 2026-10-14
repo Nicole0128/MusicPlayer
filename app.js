@@ -84,7 +84,6 @@ const elements = {
 };
 
 const ICON_PATHS = {
-  note: ["M15 4v12.5a4.5 4.5 0 1 1-2-3.7V7l9-2v9.5a4.5 4.5 0 1 1-2-3.7V2z"],
   play: ["M8 5v14l11-7z"],
   pause: ["M7 5h4v14H7z", "M15 5h4v14h-4z"],
   next: ["M6 5v14l10-7z", "M18 5v14"],
@@ -126,6 +125,8 @@ let importing = false;
 let refreshingCatalog = false;
 let downloadingAll = false;
 let serviceWorkerRegistration = null;
+let statusTimer = 0;
+let statusVersion = 0;
 
 function readLoopMode() {
   try {
@@ -146,9 +147,18 @@ function storeSetting(key, value) {
 }
 
 function setStatus(message, kind = "info") {
+  const version = ++statusVersion;
+  window.clearTimeout(statusTimer);
   elements.status.textContent = message;
   elements.status.dataset.kind = kind;
   if (message) elements.playbackStatus.textContent = message;
+  if (message && kind === "success") {
+    statusTimer = window.setTimeout(() => {
+      if (version !== statusVersion) return;
+      elements.status.textContent = "";
+      delete elements.status.dataset.kind;
+    }, 3000);
+  }
 }
 
 function storageErrorMessage(error) {
@@ -457,7 +467,6 @@ function applyCover(element, song) {
   const source = song ? coverSource(song) : null;
   element.classList.toggle("has-cover", Boolean(source));
   element.style.backgroundImage = source ? `url("${source}")` : "";
-  if (!element.hasChildNodes()) element.append(makeIcon("note", "cover-note"));
 }
 
 function createListCover(song) {
@@ -831,7 +840,7 @@ function updatePlaybackUI() {
   elements.miniTitle.textContent = song ? song.title : "選擇一首歌曲";
   elements.miniSubtitle.textContent = song
     ? `${isLocalSong(song) ? "本機匯入" : "線上歌單"} · ${elements.audio.ended ? "播放佇列已結束" : elements.audio.paused ? "已暫停" : "正在播放"}`
-    : "我的音樂庫";
+    : "音樂庫";
   elements.fullTitle.textContent = song ? "正在播放" : "播放頁";
   elements.fullTrackTitle.textContent = song ? song.title : "尚未選擇歌曲";
   if (!song) elements.fullTrackSource.textContent = "選擇音樂庫中的歌曲開始播放";
@@ -869,7 +878,7 @@ function createSongRow(song) {
   title.textContent = song.title;
   const sub = document.createElement("span");
   sub.className = "song-filename";
-  sub.textContent = isLocalSong(song) ? song.originalFileName : (song.sourceRemoved ? "此歌曲已從線上歌單移除" : `版本 ${song.version}`);
+  sub.textContent = isLocalSong(song) ? song.originalFileName : (song.sourceRemoved ? "此歌曲已從線上歌單移除" : "");
   const state = document.createElement("span");
   state.className = "song-state";
   state.hidden = song.id !== currentSongId;
@@ -912,9 +921,7 @@ function renderLibrary(focusRename = false) {
   const query = elements.search.value.trim().toLocaleLowerCase();
   const visible = songs.filter((song) => !query || song.title.toLocaleLowerCase().includes(query));
   elements.songList.replaceChildren(...visible.map(createSongRow));
-  const onlineCount = songs.filter(isOnlineSong).length;
-  const localCount = songs.filter(isLocalSong).length;
-  elements.songCount.textContent = `${songs.length} 首 · 線上 ${onlineCount} · 本機 ${localCount}`;
+  elements.songCount.textContent = `${songs.length} 首歌曲`;
   elements.visibleCount.textContent = query ? `顯示 ${visible.length} 首` : "";
   elements.emptyState.hidden = songs.length > 0;
   elements.noResults.hidden = songs.length === 0 || visible.length > 0;

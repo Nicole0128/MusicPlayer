@@ -1,7 +1,7 @@
 "use strict";
 
 // Bump this value whenever the app shell or its asset list changes.
-const CACHE_NAME = "personal-music-player-shell-v9";
+const CACHE_NAME = "personal-music-player-shell-v10";
 const APP_SCOPE = self.registration.scope;
 const SHELL_ASSETS = [
   "./",
@@ -10,10 +10,10 @@ const SHELL_ASSETS = [
   "./app.js",
   "./songs.json",
   "./manifest.webmanifest",
-  "./icons/app-icon.svg",
-  "./icons/app-icon-180.png",
-  "./icons/app-icon-192.png",
-  "./icons/app-icon-512.png"
+  "./icons/app-icon.svg?v=2",
+  "./icons/app-icon-180.png?v=2",
+  "./icons/app-icon-192.png?v=2",
+  "./icons/app-icon-512.png?v=2"
 ].map((path) => new URL(path, APP_SCOPE).href);
 
 self.addEventListener("install", (event) => {
