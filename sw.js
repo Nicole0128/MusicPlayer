@@ -1,13 +1,14 @@
 "use strict";
 
 // Bump this value whenever the app shell or its asset list changes.
-const CACHE_NAME = "personal-music-player-shell-v10";
+const CACHE_NAME = "personal-music-player-shell-v13";
+const ASSET_VERSION = "13";
 const APP_SCOPE = self.registration.scope;
 const SHELL_ASSETS = [
   "./",
   "./index.html",
-  "./style.css",
-  "./app.js",
+  `./style.css?v=${ASSET_VERSION}`,
+  `./app.js?v=${ASSET_VERSION}`,
   "./songs.json",
   "./manifest.webmanifest",
   "./icons/app-icon.svg?v=2",
@@ -17,9 +18,19 @@ const SHELL_ASSETS = [
 ].map((path) => new URL(path, APP_SCOPE).href);
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)));
+  event.waitUntil(cacheShellAssets());
   // Do not call skipWaiting automatically. The page offers a user-controlled update.
 });
+
+async function cacheShellAssets() {
+  const cache = await caches.open(CACHE_NAME);
+  await Promise.all(SHELL_ASSETS.map(async (assetUrl) => {
+    const request = new Request(assetUrl, { cache: "reload" });
+    const response = await fetch(request);
+    if (!response.ok) throw new Error(`Unable to cache app shell asset: ${assetUrl}`);
+    await cache.put(assetUrl, response);
+  }));
+}
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
@@ -69,21 +80,20 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith((async () => {
-      try {
-        const response = await fetch(request);
-        if (response.ok) {
-          const cache = await caches.open(CACHE_NAME);
-          cache.put(new URL("./index.html", APP_SCOPE).href, response.clone()).catch(() => {});
-        }
-        return response;
-      } catch {
-        return (await caches.match(new URL("./index.html", APP_SCOPE).href)) || Response.error();
-      }
+      const cache = await caches.open(CACHE_NAME);
+      const indexUrl = new URL("./index.html", APP_SCOPE).href;
+      const cached = await cache.match(indexUrl) || await cache.match(APP_SCOPE);
+      if (cached) return cached;
+      try { return await fetch(request); }
+      catch { return Response.error(); }
     })());
     return;
   }
 
   if (SHELL_ASSETS.includes(url.href)) {
-    event.respondWith((async () => (await caches.match(url.href)) || fetch(request))());
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
+      return (await cache.match(url.href)) || fetch(request);
+    })());
   }
 });

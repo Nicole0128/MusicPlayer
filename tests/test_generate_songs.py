@@ -74,6 +74,8 @@ class GenerateSongsTests(unittest.TestCase):
                         {
                             "id": "keep-this-id",
                             "title": "使用者自訂歌名",
+                            "artist": "自訂歌手",
+                            "album": "專輯名稱",
                             "audioUrl": quote(audio_path, safe="/-._~"),
                             "coverUrl": quote(cover_path, safe="/-._~"),
                             "version": "old-version",
@@ -89,6 +91,8 @@ class GenerateSongsTests(unittest.TestCase):
 
         self.assertEqual(song["id"], "keep-this-id")
         self.assertEqual(song["title"], "使用者自訂歌名")
+        self.assertEqual(song["artist"], "自訂歌手")
+        self.assertEqual(song["album"], "專輯名稱")
         self.assertEqual(unquote(song["coverUrl"]), cover_path)
         self.assertNotEqual(song["version"], "old-version")
 

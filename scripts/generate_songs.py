@@ -187,6 +187,10 @@ def build_catalog(root: Path, previous_catalog: Path) -> list[dict[str, str]]:
             "audioUrl": quote(relative_path, safe="/-._~"),
             "version": sha256_file(audio_file),
         }
+        for field in ("artist", "album"):
+            value = old_entry.get(field)
+            if isinstance(value, str) and value.strip():
+                song[field] = value.strip()
         if cover_url:
             song["coverUrl"] = cover_url
         songs.append(song)

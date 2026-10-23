@@ -8,6 +8,7 @@ const STORE_NAME = "songs";
 const CATALOG_CACHE_ID = "__music-player:catalog-cache";
 const LOOP_STORAGE_KEY = "personal-music-player.loop-mode";
 const SHUFFLE_STORAGE_KEY = "personal-music-player.shuffle-enabled";
+const MANUAL_QUEUE_STORAGE_KEY = "personal-music-player.manual-queue";
 const LOOP_MODES = ["none", "all", "one"];
 const MAX_TITLE_LENGTH = 180;
 const COVER_LIMIT = 1024;
@@ -19,6 +20,8 @@ const elements = {
   status: document.querySelector("#statusMessage"),
   songList: document.querySelector("#songList"),
   emptyState: document.querySelector("#emptyState"),
+  emptyStateTitle: document.querySelector("#emptyStateTitle"),
+  emptyStateDescription: document.querySelector("#emptyStateDescription"),
   emptyRefreshButton: document.querySelector("#emptyRefreshButton"),
   noResults: document.querySelector("#noResults"),
   songCount: document.querySelector("#songCount"),
@@ -30,6 +33,10 @@ const elements = {
   quickMenuButton: document.querySelector("#quickMenuButton"),
   quickActionsDialog: document.querySelector("#quickActionsDialog"),
   closeQuickActionsButton: document.querySelector("#closeQuickActionsButton"),
+  removedSongsButton: document.querySelector("#removedSongsButton"),
+  removedSongsDialog: document.querySelector("#removedSongsDialog"),
+  removedSongList: document.querySelector("#removedSongList"),
+  closeRemovedSongsButton: document.querySelector("#closeRemovedSongsButton"),
   downloadAllButton: document.querySelector("#downloadAllButton"),
   refreshPlaylistButton: document.querySelector("#refreshPlaylistButton"),
   downloadProgress: document.querySelector("#downloadProgress"),
@@ -43,7 +50,21 @@ const elements = {
   miniSubtitle: document.querySelector("#miniSubtitle"),
   miniPlayButton: document.querySelector("#miniPlayButton"),
   miniPlayIcon: document.querySelector("#miniPlayIcon"),
-  miniNextButton: document.querySelector("#miniNextButton"),
+  desktopShuffleButton: document.querySelector("#desktopShuffleButton"),
+  desktopPreviousButton: document.querySelector("#desktopPreviousButton"),
+  desktopPlayButton: document.querySelector("#desktopPlayButton"),
+  desktopPlayIcon: document.querySelector("#desktopPlayIcon"),
+  desktopNextButton: document.querySelector("#desktopNextButton"),
+  desktopRepeatButton: document.querySelector("#desktopRepeatButton"),
+  desktopSeekBar: document.querySelector("#desktopSeekBar"),
+  desktopElapsed: document.querySelector("#desktopElapsed"),
+  desktopDuration: document.querySelector("#desktopDuration"),
+  miniProgressValue: document.querySelector("#miniProgressValue"),
+  queueButton: document.querySelector("#queueButton"),
+  fullQueueButton: document.querySelector("#fullQueueButton"),
+  queueDialog: document.querySelector("#queueDialog"),
+  queueContent: document.querySelector("#queueContent"),
+  closeQueueButton: document.querySelector("#closeQueueButton"),
   playerDialog: document.querySelector("#playerDialog"),
   closePlayerButton: document.querySelector("#closePlayerButton"),
   fullTitle: document.querySelector("#fullTitle"),
@@ -73,6 +94,7 @@ const elements = {
   trackMenuDialog: document.querySelector("#trackMenuDialog"),
   trackMenuTitle: document.querySelector("#trackMenuTitle"),
   trackMenuSource: document.querySelector("#trackMenuSource"),
+  trackOriginalFilename: document.querySelector("#trackOriginalFilename"),
   trackActionList: document.querySelector("#trackActionList"),
   closeTrackMenuButton: document.querySelector("#closeTrackMenuButton"),
   coverPreviewDialog: document.querySelector("#coverPreviewDialog"),
@@ -96,9 +118,17 @@ const ICON_PATHS = {
   download: ["M12 3v12", "m7 10 5 5 5-5", "M4 17v3h16v-3"],
   refresh: ["M20 7v5h-5", "M4 17v-5h5", "M5.5 9a7 7 0 0 1 11.9-2L20 12", "M4 12l2.6 5a7 7 0 0 0 11.9-2"],
   image: ["M4 5h16v14H4z", "m4 15 4-4 4 4 3-3 5 5", "M9 9h.01"],
+  edit: ["m15 5 4 4", "M4 20l4.2-.8L19 8.4 15.6 5 4.8 15.8 4 20z"],
+  artist: ["M20 21a8 8 0 0 0-16 0", "M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"],
   trash: ["M4 7h16", "M10 11v6", "M14 11v6", "M6 7l1 13h10l1-13", "M9 7V4h6v3"],
   check: ["m5 12 4 4L19 6"],
-  cloud: ["M7 18a4 4 0 1 1 .8-7.9A5.5 5.5 0 0 1 18 9a4 4 0 1 1 0 9z"]
+  cloud: ["M7 18a4 4 0 1 1 .8-7.9A5.5 5.5 0 0 1 18 9a4 4 0 1 1 0 9z"],
+  drag: ["M8 5h.01", "M16 5h.01", "M8 12h.01", "M16 12h.01", "M8 19h.01", "M16 19h.01"],
+  up: ["m6 14 6-6 6 6"],
+  down: ["m6 10 6 6 6-6"],
+  restore: ["M3 12a9 9 0 1 0 3-6.7L3 8", "M3 3v5h5"],
+  queue: ["M4 6h16", "M4 12h10", "M4 18h7", "m17 15 3 3-3 3"],
+  device: ["M5 3h14v18H5z", "M9 7h6", "M10 17h4"]
 };
 
 let database = null;
@@ -113,6 +143,9 @@ let autoFailedIds = new Set();
 let playbackRequestToken = 0;
 let coverObjectUrls = new Map();
 let previewCoverUrl = null;
+let mediaArtworkUrl = null;
+let mediaMetadataKey = "";
+let mediaMetadataRequest = 0;
 let pendingCoverBlob = null;
 let pendingCoverSongId = null;
 let actionSongId = null;
@@ -120,13 +153,21 @@ let loopMode = readLoopMode();
 let shuffleEnabled = readShuffleSetting();
 let shuffleUpcoming = [];
 let shuffleHistory = [];
+let manualQueue = readManualQueue();
+let playbackHistory = [];
 let downloadStates = new Map();
 let importing = false;
 let refreshingCatalog = false;
+let libraryLoading = false;
+let libraryLoadError = "";
 let downloadingAll = false;
 let serviceWorkerRegistration = null;
+let serviceWorkerInitialized = false;
 let statusTimer = 0;
 let statusVersion = 0;
+let queueReturnFocus = null;
+let queuePreviousOverflow = "";
+let queueDrag = null;
 
 function readLoopMode() {
   try {
@@ -140,6 +181,18 @@ function readLoopMode() {
 function readShuffleSetting() {
   try { return localStorage.getItem(SHUFFLE_STORAGE_KEY) === "true"; }
   catch { return false; }
+}
+
+function readManualQueue() {
+  try {
+    const value = JSON.parse(localStorage.getItem(MANUAL_QUEUE_STORAGE_KEY) || "[]");
+    return Array.isArray(value) ? value.filter((id) => typeof id === "string") : [];
+  } catch { return []; }
+}
+
+function persistManualQueue() {
+  storeSetting(MANUAL_QUEUE_STORAGE_KEY, JSON.stringify(manualQueue));
+  renderQueue();
 }
 
 function storeSetting(key, value) {
@@ -175,14 +228,28 @@ function openDatabase() {
       return;
     }
     let request;
+    let settled = false;
+    const timeoutId = window.setTimeout(() => finishWithError(new Error("開啟本機音樂庫逾時。請重試；既有下載資料不會被清除。")), 15000);
+    const finishWithError = (error) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      reject(error);
+    };
     try { request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION); }
-    catch (error) { reject(error); return; }
+    catch (error) { finishWithError(error); return; }
 
     request.onupgradeneeded = () => {
       // This branch only creates the old store on a genuinely new database.
       if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME, { keyPath: "id" });
     };
     request.onsuccess = () => {
+      if (settled) {
+        request.result.close();
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timeoutId);
       database = request.result;
       database.onversionchange = () => {
         database.close();
@@ -191,7 +258,7 @@ function openDatabase() {
       };
       resolve(database);
     };
-    request.onerror = () => reject(request.error || new Error("無法開啟本機音樂庫。"));
+    request.onerror = () => finishWithError(request.error || new Error("無法開啟本機音樂庫。"));
     request.onblocked = () => setStatus("資料庫正被其他分頁使用，請關閉其他播放器分頁後重試。", "error");
   });
 }
@@ -318,7 +385,7 @@ function validateCatalog(data, manifestUrl) {
   const seen = new Set();
   return data.songs.map((entry, index) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`第 ${index + 1} 首歌曲資料不是物件。`);
-    const { id, title, audioUrl, coverUrl, version } = entry;
+    const { id, title, audioUrl, coverUrl, version, artist, album } = entry;
     if (typeof id !== "string" || !id.trim() || id.length > 120) throw new Error(`第 ${index + 1} 首歌曲的 id 無效。`);
     if (seen.has(id)) throw new Error(`歌曲 id「${id}」重複，歌單未套用。`);
     seen.add(id);
@@ -326,7 +393,7 @@ function validateCatalog(data, manifestUrl) {
     if (typeof version !== "string" || !version.trim()) throw new Error(`歌曲「${id}」缺少音訊 version。`);
     const resolvedAudioUrl = resolveRelativeAsset(audioUrl, manifestUrl, `歌曲「${id}」的 audioUrl`);
     const resolvedCoverUrl = coverUrl == null || coverUrl === "" ? null : resolveRelativeAsset(coverUrl, manifestUrl, `歌曲「${id}」的 coverUrl`);
-    return { id, title: title.trim(), audioPath: audioUrl, audioUrl: resolvedAudioUrl, coverPath: coverUrl || null, coverUrl: resolvedCoverUrl, version: version.trim() };
+    return { id, title: title.trim(), artist: typeof artist === "string" ? artist.trim().slice(0, MAX_TITLE_LENGTH) : "", album: typeof album === "string" ? album.trim().slice(0, MAX_TITLE_LENGTH) : "", audioPath: audioUrl, audioUrl: resolvedAudioUrl, coverPath: coverUrl || null, coverUrl: resolvedCoverUrl, version: version.trim() };
   });
 }
 
@@ -336,12 +403,12 @@ function catalogCacheRecord(entries) {
     recordType: "catalog-cache",
     manifestUrl: catalogManifestUrl().href,
     savedAt: new Date().toISOString(),
-    entries: entries.map((song) => ({ id: song.id, title: song.title, audioUrl: song.audioPath, ...(song.coverPath ? { coverUrl: song.coverPath } : {}), version: song.version }))
+    entries: entries.map((song) => ({ id: song.id, title: song.title, ...(song.artist ? { artist: song.artist } : {}), ...(song.album ? { album: song.album } : {}), audioUrl: song.audioPath, ...(song.coverPath ? { coverUrl: song.coverPath } : {}), version: song.version }))
   };
 }
 
 function getOfflineRemoteRecords() {
-  return [...remoteRecords.values()].filter((song) => hasAudioBlob(song) || song.userTitle || song.customCoverBlob instanceof Blob);
+  return [...remoteRecords.values()].filter((song) => hasAudioBlob(song) || song.userTitle || song.customCoverBlob instanceof Blob || song.userRestored);
 }
 
 function composeSongs() {
@@ -349,7 +416,10 @@ function composeSongs() {
   const archived = getOfflineRemoteRecords()
     .filter((song) => !currentIds.has(song.remoteId) && (song.sourceRemoved || song.id === currentSongId))
     .map((song) => ({ ...song, sourceRemoved: true }));
-  songs = [...catalogSongs, ...archived, ...localSongs];
+  songs = [...catalogSongs.filter((song) => !song.hiddenFromLibrary), ...archived.filter((song) => !song.hiddenFromLibrary), ...localSongs];
+  const validQueue = manualQueue.filter((id) => songs.some((song) => song.id === id));
+  if (validQueue.length !== manualQueue.length) storeSetting(MANUAL_QUEUE_STORAGE_KEY, JSON.stringify(validQueue));
+  manualQueue = validQueue;
   reconcileShuffleQueue();
 }
 
@@ -371,6 +441,8 @@ async function applyCatalog(entries, { persist = true } = {}) {
       manifestTitle: entry.title,
       title: userTitle || entry.title,
       userTitle,
+      artist: typeof old?.customArtist === "string" ? old.customArtist : entry.artist,
+      album: entry.album,
       audioUrl: entry.audioUrl,
       audioPath: entry.audioPath,
       coverUrl: entry.coverUrl,
@@ -387,7 +459,7 @@ async function applyCatalog(entries, { persist = true } = {}) {
 
   for (const [remoteId, old] of nextRemoteRecords) {
     if (presentIds.has(remoteId)) continue;
-    const keep = hasAudioBlob(old) || Boolean(old.userTitle) || old.customCoverBlob instanceof Blob || old.id === currentSongId;
+    const keep = hasAudioBlob(old) || Boolean(old.userTitle) || old.customCoverBlob instanceof Blob || old.userRestored || old.id === currentSongId;
     if (keep) {
       const archived = { ...old, sourceRemoved: true };
       nextRemoteRecords.set(remoteId, archived);
@@ -414,9 +486,15 @@ async function refreshCatalog({ quiet = false } = {}) {
   if (refreshingCatalog) return false;
   refreshingCatalog = true;
   if (!quiet) setStatus("正在讀取最新線上歌單…", "working");
+  let timeoutId = 0;
   try {
     const url = catalogManifestUrl();
-    const response = await fetch(url.href, { cache: "no-store", headers: { Accept: "application/json" } });
+    const response = await Promise.race([
+      fetch(url.href, { cache: "no-store", headers: { Accept: "application/json" } }),
+      new Promise((resolve, reject) => {
+        timeoutId = window.setTimeout(() => reject(new Error("讀取線上歌單逾時。")), 15000);
+      })
+    ]);
     if (!response.ok) throw new Error(`songs.json 回應 HTTP ${response.status}。`);
     const raw = await response.json();
     const entries = validateCatalog(raw, url);
@@ -428,6 +506,7 @@ async function refreshCatalog({ quiet = false } = {}) {
     setStatus(`無法更新線上歌單：${error.message || "網路連線失敗。"} ${fallback}`, "error");
     return false;
   } finally {
+    window.clearTimeout(timeoutId);
     refreshingCatalog = false;
   }
 }
@@ -467,6 +546,107 @@ function applyCover(element, song) {
   const source = song ? coverSource(song) : null;
   element.classList.toggle("has-cover", Boolean(source));
   element.style.backgroundImage = source ? `url("${source}")` : "";
+}
+
+function mediaSession() {
+  try { return navigator.mediaSession || null; } catch { return null; }
+}
+
+function setMediaPlaybackState() {
+  const session = mediaSession();
+  if (!session) return;
+  try { session.playbackState = !currentSongId ? "none" : elements.audio.paused ? "paused" : "playing"; } catch { }
+}
+
+function updateMediaPosition() {
+  const session = mediaSession();
+  if (!session || typeof session.setPositionState !== "function") return;
+  const duration = elements.audio.duration;
+  const position = elements.audio.currentTime;
+  const playbackRate = elements.audio.playbackRate;
+  if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(position) || position < 0) return;
+  try {
+    session.setPositionState({ duration, position: Math.min(position, duration), playbackRate: Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1 });
+  } catch { }
+}
+
+async function createPaddedArtwork(song) {
+  let blob = coverBlobForSong(song);
+  if (!blob && isOnlineSong(song) && song.coverUrl && navigator.onLine) {
+    const response = await fetch(song.coverUrl, { cache: "force-cache" });
+    if (!response.ok) throw new Error("封面無法載入");
+    blob = await response.blob();
+  }
+  if (!blob) return null;
+  const image = await decodeImage(blob);
+  try {
+    const width = image.width || image.naturalWidth;
+    const height = image.height || image.naturalHeight;
+    if (!width || !height) return null;
+    const size = 512;
+    const scale = Math.min(size / width, size / height);
+    const drawWidth = width * scale;
+    const drawHeight = height * scale;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) return null;
+    context.fillStyle = "#f6f2eb";
+    context.fillRect(0, 0, size, size);
+    context.drawImage(image, (size - drawWidth) / 2, (size - drawHeight) / 2, drawWidth, drawHeight);
+    return await canvasToBlob(canvas, "image/jpeg", .9);
+  } finally {
+    if (typeof image.close === "function") image.close();
+  }
+}
+
+function assignMediaMetadata(session, song, artworkUrl = null) {
+  if (typeof window.MediaMetadata !== "function") return;
+  try {
+    const artwork = artworkUrl ? [{ src: artworkUrl, sizes: "512x512", type: "image/jpeg" }] : [];
+    const metadata = { title: song.title || "音樂庫", artist: song.artist || "", artwork };
+    if (song.album) metadata.album = song.album;
+    session.metadata = new MediaMetadata(metadata);
+  } catch { }
+}
+
+function updateMediaSession() {
+  const session = mediaSession();
+  const song = currentSong();
+  setMediaPlaybackState();
+  if (!session) return;
+  if (!song) {
+    mediaMetadataKey = "";
+    mediaMetadataRequest += 1;
+    try { session.metadata = null; } catch { }
+    if (typeof session.setPositionState === "function") { try { session.setPositionState(); } catch { } }
+    if (mediaArtworkUrl) URL.revokeObjectURL(mediaArtworkUrl);
+    mediaArtworkUrl = null;
+    return;
+  }
+  const source = coverSource(song) || "";
+  const key = `${song.id}|${song.title}|${song.artist || ""}|${song.album || ""}|${source}`;
+  if (key === mediaMetadataKey) return;
+  mediaMetadataKey = key;
+  const request = ++mediaMetadataRequest;
+  assignMediaMetadata(session, song, source);
+  createPaddedArtwork(song).then((blob) => {
+    if (!blob || request !== mediaMetadataRequest || currentSongId !== song.id) return;
+    if (mediaArtworkUrl) URL.revokeObjectURL(mediaArtworkUrl);
+    mediaArtworkUrl = URL.createObjectURL(blob);
+    assignMediaMetadata(session, song, mediaArtworkUrl);
+  }).catch(() => {});
+}
+
+function setupMediaSession() {
+  const session = mediaSession();
+  if (!session || typeof session.setActionHandler !== "function") return;
+  const handlers = { play: () => togglePlayback(), pause: () => elements.audio.pause(), previoustrack: () => playPrevious(), nexttrack: () => playNext() };
+  for (const [action, handler] of Object.entries(handlers)) {
+    try { session.setActionHandler(action, handler); } catch { }
+  }
+  updateMediaSession();
 }
 
 function createListCover(song) {
@@ -540,7 +720,11 @@ function releaseAudioUrl() {
   currentObjectUrl = null;
 }
 
-function setAudioSource(song, shouldPlay, automatic = false) {
+function setAudioSource(song, shouldPlay, automatic = false, rememberPrevious = true) {
+  if (rememberPrevious && currentSongId && currentSongId !== song.id) {
+    playbackHistory.push(currentSongId);
+    if (shuffleEnabled) shuffleHistory.push(currentSongId);
+  }
   playbackRequestToken += 1;
   elements.audio.pause();
   elements.audio.removeAttribute("src");
@@ -572,10 +756,11 @@ function clearCurrentPlayback() {
   elements.seekBar.value = "0";
   elements.seekBar.max = "0";
   updatePlaybackUI();
+  updateMediaSession();
   setPlaybackStatus("準備就緒");
 }
 
-function selectSong(id, shouldPlay = true, source = "direct") {
+function selectSong(id, shouldPlay = true, source = "direct", rememberPrevious = true) {
   const song = bySongId(id);
   if (!song) return false;
   if (!isPlayableNow(song, source === "auto" || (source === "queue" && shuffleEnabled))) {
@@ -586,14 +771,15 @@ function selectSong(id, shouldPlay = true, source = "direct") {
     if (source === "direct" && shouldPlay) {
       if (elements.audio.error) setAudioSource(song, true, false);
       else togglePlayback();
+    } else if (["manual-queue", "auto", "queue"].includes(source)) {
+      setAudioSource(song, shouldPlay, source === "auto", rememberPrevious);
     }
     return true;
   }
   if (shuffleEnabled && source === "direct") {
-    if (currentSongId) shuffleHistory.push(currentSongId);
     shuffleUpcoming = shuffleUpcoming.filter((queuedId) => queuedId !== id);
   }
-  setAudioSource(song, shouldPlay, source === "auto" || (source === "queue" && shuffleEnabled));
+  setAudioSource(song, shouldPlay, source === "auto" || (source === "queue" && shuffleEnabled), rememberPrevious);
   updateCurrentIndicators();
   return true;
 }
@@ -618,6 +804,211 @@ function playCurrent() {
   });
 }
 
+function nextManualSong(shouldPlay = true) {
+  let skippedOffline = false;
+  while (manualQueue.length) {
+    const id = manualQueue.shift();
+    shuffleUpcoming = shuffleUpcoming.filter((queuedId) => queuedId !== id);
+    const song = bySongId(id);
+    if (song && isPlayableNow(song)) {
+      persistManualQueue();
+      return selectSong(id, shouldPlay, "manual-queue");
+    }
+    skippedOffline = true;
+  }
+  persistManualQueue();
+  if (skippedOffline) setStatus("佇列中的部分歌曲尚未下載，已略過並繼續播放。", "error");
+  return false;
+}
+
+function addToManualQueue(id, next = false) {
+  if (!bySongId(id)) return;
+  if (next) manualQueue.unshift(id);
+  else manualQueue.push(id);
+  persistManualQueue();
+  setPlaybackStatus(next ? "已排在下一首" : "已加入播放佇列");
+}
+
+function automaticQueueIds() {
+  const excluded = new Set(manualQueue);
+  if (shuffleEnabled) return shuffleUpcoming.filter((id) => !excluded.has(id));
+  const currentIndex = songs.findIndex((song) => song.id === currentSongId);
+  const upcoming = currentIndex < 0 ? songs : [...songs.slice(currentIndex + 1), ...(loopMode === "all" ? songs.slice(0, currentIndex) : [])];
+  return upcoming.map((song) => song.id).filter((id) => !excluded.has(id));
+}
+
+function createQueueSong(song, { removable = false, index = -1 } = {}) {
+  const row = document.createElement("article");
+  row.className = "queue-song";
+  if (index >= 0) row.dataset.queueIndex = String(index);
+  const cover = document.createElement("span");
+  cover.className = "cover cover-queue";
+  applyCover(cover, song);
+  const copy = document.createElement("span");
+  copy.className = "queue-song-copy";
+  const title = document.createElement("span");
+  title.className = "queue-song-title";
+  title.textContent = song.title;
+  const artist = document.createElement("span");
+  artist.className = "queue-song-artist";
+  artist.textContent = song.artist || "";
+  copy.append(title, artist);
+  row.append(cover, copy);
+  if (removable) {
+    const reorder = document.createElement("div");
+    reorder.className = "queue-song-actions";
+    const handle = document.createElement("button");
+    handle.className = "queue-handle";
+    handle.type = "button";
+    handle.setAttribute("aria-label", `拖曳調整「${song.title}」順序`);
+    handle.append(makeIcon("drag"));
+    handle.addEventListener("pointerdown", (event) => {
+      if (!event.isPrimary || event.button !== 0 || queueDrag) return;
+      event.preventDefault();
+      queueDrag = { from: index, to: index, pointerId: event.pointerId, startY: event.clientY, row, handle };
+      row.classList.add("is-dragging");
+      elements.queueContent.classList.add("queue-dragging");
+      try { handle.setPointerCapture(event.pointerId); } catch { }
+    });
+    const more = document.createElement("button");
+    more.className = "queue-more";
+    more.type = "button";
+    more.setAttribute("aria-label", `更多佇列操作：${song.title}`);
+    more.setAttribute("aria-expanded", "false");
+    more.append(makeIcon("more"));
+    const menu = document.createElement("div");
+    menu.className = "queue-more-menu";
+    menu.id = `queue-menu-${index}`;
+    menu.setAttribute("role", "group");
+    menu.setAttribute("aria-label", `佇列操作：${song.title}`);
+    menu.hidden = true;
+    more.setAttribute("aria-controls", menu.id);
+    const up = document.createElement("button");
+    up.className = "queue-menu-action";
+    up.type = "button";
+    up.setAttribute("aria-label", `將「${song.title}」上移`);
+    up.append(makeIcon("up"));
+    up.append(document.createTextNode("上移"));
+    up.disabled = index === 0;
+    up.addEventListener("click", () => moveQueueItem(index, index - 1));
+    const down = document.createElement("button");
+    down.className = "queue-menu-action";
+    down.type = "button";
+    down.setAttribute("aria-label", `將「${song.title}」下移`);
+    down.append(makeIcon("down"));
+    down.append(document.createTextNode("下移"));
+    down.disabled = index === manualQueue.length - 1;
+    down.addEventListener("click", () => moveQueueItem(index, index + 1));
+    const remove = document.createElement("button");
+    remove.className = "queue-menu-action queue-remove";
+    remove.type = "button";
+    remove.setAttribute("aria-label", `從佇列移除「${song.title}」`);
+    remove.append(makeIcon("close"));
+    remove.append(document.createTextNode("從佇列移除"));
+    remove.addEventListener("click", () => { manualQueue.splice(index, 1); persistManualQueue(); });
+    menu.append(up, down, remove);
+    more.addEventListener("click", () => {
+      const expanded = more.getAttribute("aria-expanded") === "true";
+      for (const otherMenu of elements.queueContent.querySelectorAll(".queue-more-menu")) {
+        if (otherMenu === menu) continue;
+        otherMenu.hidden = true;
+        otherMenu.parentElement.querySelector(".queue-more")?.setAttribute("aria-expanded", "false");
+      }
+      more.setAttribute("aria-expanded", String(!expanded));
+      menu.hidden = expanded;
+      if (!expanded) {
+        menu.classList.toggle("open-up", window.innerHeight - row.getBoundingClientRect().bottom < 176);
+        menu.querySelector("button:not(:disabled)")?.focus();
+      }
+    });
+    reorder.append(handle, more, menu);
+    row.append(reorder);
+  }
+  return row;
+}
+
+function updateQueueDrag(event) {
+  if (!queueDrag || event.pointerId !== queueDrag.pointerId) return;
+  event.preventDefault();
+  queueDrag.row.style.setProperty("--drag-offset", `${event.clientY - queueDrag.startY}px`);
+  for (const row of elements.queueContent.querySelectorAll(".queue-song[data-queue-index]")) {
+    row.classList.remove("queue-drop-before", "queue-drop-after");
+  }
+  const target = [...elements.queueContent.querySelectorAll(".queue-song[data-queue-index]")]
+    .filter((row) => row !== queueDrag.row)
+    .find((row) => event.clientY >= row.getBoundingClientRect().top && event.clientY <= row.getBoundingClientRect().bottom);
+  if (!target) return;
+  const targetIndex = Number(target.dataset.queueIndex);
+  const after = event.clientY > target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
+  target.classList.add(after ? "queue-drop-after" : "queue-drop-before");
+  const insertionPoint = targetIndex + (after ? 1 : 0);
+  queueDrag.to = Math.max(0, Math.min(manualQueue.length - 1, insertionPoint > queueDrag.from ? insertionPoint - 1 : insertionPoint));
+}
+
+function finishQueueDrag(event, shouldMove = true) {
+  if (!queueDrag || event.pointerId !== queueDrag.pointerId) return;
+  const { from, to, row, handle } = queueDrag;
+  queueDrag = null;
+  row.classList.remove("is-dragging", "queue-drop-before", "queue-drop-after");
+  row.style.removeProperty("--drag-offset");
+  elements.queueContent.classList.remove("queue-dragging");
+  for (const item of elements.queueContent.querySelectorAll(".queue-drop-before, .queue-drop-after")) item.classList.remove("queue-drop-before", "queue-drop-after");
+  try { handle.releasePointerCapture(event.pointerId); } catch { }
+  if (shouldMove && from !== to) moveQueueItem(from, to);
+}
+
+function moveQueueItem(from, to) {
+  if (from < 0 || from >= manualQueue.length || to < 0 || to >= manualQueue.length || from === to) return;
+  const [id] = manualQueue.splice(from, 1);
+  manualQueue.splice(to, 0, id);
+  persistManualQueue();
+}
+
+function renderQueue() {
+  if (!elements.queueContent) return;
+  const current = currentSong();
+  const playingSection = document.createElement("section");
+  playingSection.className = "queue-section";
+  const playingHeading = document.createElement("h3");
+  playingHeading.textContent = "正在播放";
+  playingSection.append(playingHeading);
+  if (current) playingSection.append(createQueueSong(current));
+  else {
+    const empty = document.createElement("p");
+    empty.className = "queue-empty";
+    empty.textContent = "尚未選擇歌曲";
+    playingSection.append(empty);
+  }
+  const upcomingSection = document.createElement("section");
+  upcomingSection.className = "queue-section";
+  const upcomingHeading = document.createElement("h3");
+  upcomingHeading.textContent = "接下來播放";
+  upcomingSection.append(upcomingHeading);
+  const manualRows = manualQueue.map((id, index) => ({ song: bySongId(id), index })).filter((item) => item.song).map(({ song, index }) => createQueueSong(song, { removable: true, index }));
+  const automaticRows = automaticQueueIds().map(bySongId).filter(Boolean).map((song) => createQueueSong(song));
+  if (!manualRows.length && !automaticRows.length) {
+    const empty = document.createElement("p");
+    empty.className = "queue-empty";
+    empty.textContent = "沒有待播歌曲";
+    upcomingSection.append(empty);
+  } else {
+    upcomingSection.append(...manualRows);
+    if (automaticRows.length) {
+      const automaticLabel = document.createElement("p");
+      automaticLabel.className = "queue-auto-label";
+      automaticLabel.textContent = "音樂庫接續播放";
+      upcomingSection.append(automaticLabel, ...automaticRows);
+    }
+    if (manualRows.length) {
+      const manualLabel = document.createElement("p");
+      manualLabel.className = "queue-auto-label manual-queue-label";
+      manualLabel.textContent = "你加入的歌曲";
+      upcomingSection.insertBefore(manualLabel, manualRows[0]);
+    }
+  }
+  elements.queueContent.replaceChildren(playingSection, upcomingSection);
+}
+
 function reportPlayFailure(error) {
   if (error?.name === "AbortError") return;
   if (error?.name === "NotAllowedError") setStatus("瀏覽器需要使用者操作才能播放，請再按一次播放。", "error");
@@ -634,33 +1025,36 @@ function togglePlayback() {
   } else elements.audio.pause();
 }
 
-function recordCurrentInHistory() {
-  if (shuffleEnabled && currentSongId) shuffleHistory.push(currentSongId);
-}
-
 function findNextRandom({ manual = false, failed = false } = {}) {
   if (!songs.length) return false;
   if (!currentSongId) {
     reconcileShuffleQueue();
-    if (!shuffleUpcoming.length) shuffleUpcoming = shuffled(songIds());
+    if (!shuffleUpcoming.length) { shuffleHistory = []; shuffleUpcoming = shuffled(songIds()); }
   } else if (!shuffleUpcoming.length) {
     if (loopMode !== "all" || songs.length < 2) return false;
+    shuffleHistory = [currentSongId];
     shuffleUpcoming = shuffled(songIds(), currentSongId);
   }
 
+  let skippedUnavailable = false;
   for (let attempts = 0; attempts < songs.length; attempts += 1) {
     const nextId = shuffleUpcoming.shift();
     if (!nextId) break;
     const candidate = bySongId(nextId);
-    if (!candidate || (failed && autoFailedIds.has(nextId)) || !isPlayableNow(candidate, true)) continue;
-    if (currentSongId && !failed) recordCurrentInHistory();
+    if (!candidate || (failed && autoFailedIds.has(nextId)) || !isPlayableNow(candidate, true)) {
+      if (candidate && !isPlayableNow(candidate, true)) skippedUnavailable = true;
+      continue;
+    }
+    if (skippedUnavailable) setStatus("佇列中有尚未下載或無法播放的歌曲，已略過並繼續播放。", "error");
     return selectSong(nextId, true, manual ? "queue" : "auto");
   }
   reconcileShuffleQueue();
+  if (skippedUnavailable) setStatus("佇列中的歌曲尚未下載或無法播放，已略過。", "error");
   return false;
 }
 
 function startFirstSong() {
+  if (nextManualSong(true)) return;
   if (!songs.length) { setStatus("目前沒有歌曲。", "info"); return; }
   if (shuffleEnabled) {
     const started = findNextRandom({ manual: true });
@@ -673,30 +1067,29 @@ function startFirstSong() {
 }
 
 function playNext() {
+  if (nextManualSong(true)) return;
   if (!songs.length) return;
+  if (!currentSongId) { startFirstSong(); return; }
   if (shuffleEnabled) {
-    if (!findNextRandom({ manual: true })) setStatus("沒有可播放的下一首歌曲。", "info");
+    if (!findNextRandom({ manual: true })) setStatus(navigator.onLine ? "沒有可播放的下一首歌曲。" : "佇列中沒有已下載供離線播放的下一首歌曲。", navigator.onLine ? "info" : "error");
     return;
   }
-  if (!currentSongId) { startFirstSong(); return; }
-  const index = songs.findIndex((song) => song.id === currentSongId);
-  if (index >= 0 && index < songs.length - 1) selectSong(songs[index + 1].id, true, "queue");
-  else if (index === songs.length - 1 && loopMode === "all" && songs.length > 1) selectSong(songs[0].id, true, "queue");
+  if (!advanceLinearAutomatically(null, "queue")) setStatus(navigator.onLine ? "沒有可播放的下一首歌曲。" : "佇列中沒有已下載供離線播放的下一首歌曲。", navigator.onLine ? "info" : "error");
 }
 
 function playPrevious() {
   if (!songs.length || !currentSongId) return;
-  if (shuffleEnabled && shuffleHistory.length) {
-    let previousId = null;
-    while (shuffleHistory.length && !previousId) {
-      const candidateId = shuffleHistory.pop();
-      if (isPlayableNow(bySongId(candidateId), true)) previousId = candidateId;
+  while (playbackHistory.length) {
+    const previousId = playbackHistory.pop();
+    const previousSong = bySongId(previousId);
+    if (previousSong && isPlayableNow(previousSong)) {
+      if (shuffleEnabled && currentSongId) {
+        shuffleUpcoming = shuffleUpcoming.filter((id) => id !== currentSongId);
+        shuffleUpcoming.unshift(currentSongId);
+      }
+      selectSong(previousId, true, "history", false);
+      return;
     }
-    if (previousId) {
-      shuffleUpcoming.unshift(currentSongId);
-      selectSong(previousId, true, "queue");
-    }
-    return;
   }
   if (elements.audio.currentTime > 3) { elements.audio.currentTime = 0; return; }
   if (shuffleEnabled) return;
@@ -705,9 +1098,11 @@ function playPrevious() {
   else if (index === 0 && loopMode === "all" && songs.length > 1) selectSong(songs[songs.length - 1].id, true, "queue");
 }
 
-function advanceLinearAutomatically(startAfterIndex = null) {
+function advanceLinearAutomatically(startAfterIndex = null, source = "auto") {
+  if (nextManualSong(true)) return true;
   if (!songs.length) return false;
   const currentIndex = startAfterIndex == null ? songs.findIndex((song) => song.id === currentSongId) : startAfterIndex;
+  let skippedUnavailable = false;
   for (let offset = 1; offset <= songs.length; offset += 1) {
     let index = currentIndex + offset;
     if (index >= songs.length) {
@@ -715,9 +1110,14 @@ function advanceLinearAutomatically(startAfterIndex = null) {
       index %= songs.length;
     }
     const candidate = songs[index];
-    if (candidate.id === currentSongId || autoFailedIds.has(candidate.id) || !isPlayableNow(candidate, true)) continue;
-    return selectSong(candidate.id, true, "auto");
+    if (candidate.id === currentSongId || autoFailedIds.has(candidate.id) || !isPlayableNow(candidate, true)) {
+      if (!isPlayableNow(candidate, true)) skippedUnavailable = true;
+      continue;
+    }
+    if (skippedUnavailable) setStatus("佇列中有尚未下載或無法播放的歌曲，已略過並繼續播放。", "error");
+    return selectSong(candidate.id, true, source);
   }
+  if (skippedUnavailable) setStatus("佇列中的歌曲尚未下載或無法播放，已略過。", "error");
   return false;
 }
 
@@ -728,7 +1128,7 @@ function handleNaturalEnd() {
     playCurrent();
     return;
   }
-  const advanced = shuffleEnabled ? findNextRandom() : advanceLinearAutomatically();
+  const advanced = nextManualSong(true) || (shuffleEnabled ? findNextRandom() : advanceLinearAutomatically());
   if (!advanced) {
     updatePlaybackUI();
     setPlaybackStatus(navigator.onLine ? "播放佇列已結束" : "沒有可離線播放的下一首歌曲。下載歌曲後即可離線接續播放。");
@@ -739,7 +1139,7 @@ function handleAutomaticLoadFailure() {
   if (!currentPlaybackWasAutomatic || !currentSongId) return;
   const failedId = currentSongId;
   autoFailedIds.add(failedId);
-  const advanced = shuffleEnabled ? findNextRandom({ failed: true }) : advanceLinearAutomatically(songs.findIndex((song) => song.id === failedId));
+  const advanced = nextManualSong(true) || (shuffleEnabled ? findNextRandom({ failed: true }) : advanceLinearAutomatically(songs.findIndex((song) => song.id === failedId)));
   if (!advanced) {
     currentPlaybackWasAutomatic = false;
     setPlaybackStatus("佇列中沒有其他可播放歌曲；請檢查音訊網址或網路連線。");
@@ -747,6 +1147,7 @@ function handleAutomaticLoadFailure() {
 }
 
 function canPlayNext() {
+  if (manualQueue.some((id) => isPlayableNow(bySongId(id)))) return true;
   if (!songs.length) return false;
   if (!currentSongId) return songs.some((song) => isPlayableNow(song, true));
   if (shuffleEnabled) return shuffleUpcoming.some((id) => isPlayableNow(bySongId(id), true)) || (loopMode === "all" && songs.length > 1);
@@ -761,6 +1162,10 @@ function updateModeControls() {
   elements.shuffleButton.title = shuffleLabel;
   elements.shuffleCaption.textContent = shuffleEnabled ? "隨機開" : "隨機關";
   elements.shuffleButton.classList.toggle("is-active", shuffleEnabled);
+  elements.desktopShuffleButton.setAttribute("aria-pressed", String(shuffleEnabled));
+  elements.desktopShuffleButton.setAttribute("aria-label", shuffleLabel);
+  elements.desktopShuffleButton.title = shuffleLabel;
+  elements.desktopShuffleButton.classList.toggle("is-active", shuffleEnabled);
   const loopLabel = `循環模式：${loopModeLabel()}`;
   elements.repeatButton.setAttribute("aria-pressed", String(loopMode !== "none"));
   elements.repeatButton.setAttribute("aria-label", loopLabel);
@@ -769,6 +1174,11 @@ function updateModeControls() {
   elements.repeatButton.classList.toggle("is-active", loopMode !== "none");
   elements.repeatButton.classList.toggle("is-loop-one", loopMode === "one");
   elements.repeatBadge.hidden = loopMode !== "one";
+  elements.desktopRepeatButton.setAttribute("aria-pressed", String(loopMode !== "none"));
+  elements.desktopRepeatButton.setAttribute("aria-label", loopLabel);
+  elements.desktopRepeatButton.title = `${loopLabel}，按一下切換`;
+  elements.desktopRepeatButton.classList.toggle("is-active", loopMode !== "none");
+  elements.desktopRepeatButton.classList.toggle("is-loop-one", loopMode === "one");
 }
 
 function updateButtonState() {
@@ -776,7 +1186,13 @@ function updateButtonState() {
   const hasCurrent = Boolean(currentSong());
   elements.miniTrack.disabled = !hasSongs;
   elements.miniPlayButton.disabled = !hasSongs;
-  elements.miniNextButton.disabled = !canPlayNext();
+  elements.desktopPlayButton.disabled = !hasSongs;
+  elements.desktopPreviousButton.disabled = !hasCurrent;
+  elements.desktopNextButton.disabled = !canPlayNext();
+  elements.shuffleButton.disabled = !hasCurrent;
+  elements.repeatButton.disabled = !hasCurrent;
+  elements.desktopShuffleButton.disabled = !hasCurrent;
+  elements.desktopRepeatButton.disabled = !hasCurrent;
   elements.playButton.disabled = !hasSongs;
   elements.previousButton.disabled = !hasCurrent;
   elements.nextButton.disabled = !canPlayNext();
@@ -785,13 +1201,16 @@ function updateButtonState() {
   elements.playButton.title = paused ? "播放" : "暫停";
   elements.miniPlayButton.setAttribute("aria-label", paused ? "播放" : "暫停");
   elements.miniPlayButton.title = paused ? "播放" : "暫停";
+  elements.desktopPlayButton.setAttribute("aria-label", paused ? "播放" : "暫停");
+  elements.desktopPlayButton.title = paused ? "播放" : "暫停";
   replaceIcon(elements.playIcon, paused ? "play" : "pause");
   replaceIcon(elements.miniPlayIcon, paused ? "play" : "pause");
+  replaceIcon(elements.desktopPlayIcon, paused ? "play" : "pause");
   elements.seekBar.disabled = !hasCurrent || !Number.isFinite(elements.audio.duration);
+  elements.desktopSeekBar.disabled = elements.seekBar.disabled;
 }
 
 function updateCurrentIndicators() {
-  const stateText = !currentSongId ? "" : elements.audio.ended ? "已結束" : elements.audio.paused ? "已暫停" : "播放中";
   for (const row of elements.songList.querySelectorAll(".song-row")) {
     const active = row.dataset.songId === currentSongId;
     row.classList.toggle("is-current", active);
@@ -800,8 +1219,6 @@ function updateCurrentIndicators() {
       if (active) button.setAttribute("aria-current", "true");
       else button.removeAttribute("aria-current");
     }
-    const state = row.querySelector(".song-state");
-    if (state) { state.textContent = active ? stateText : ""; state.hidden = !active; }
     const indicator = row.querySelector(".current-indicator");
     if (indicator) {
       indicator.replaceChildren(makeIcon(active && !elements.audio.paused ? "pause" : "play", "indicator-icon"));
@@ -814,9 +1231,15 @@ function updateTimeline() {
   const current = Number.isFinite(elements.audio.currentTime) ? elements.audio.currentTime : 0;
   const duration = Number.isFinite(elements.audio.duration) ? elements.audio.duration : 0;
   if (!elements.seekBar.matches(":active")) elements.seekBar.value = String(current);
+  if (!elements.desktopSeekBar.matches(":active")) elements.desktopSeekBar.value = String(current);
   elements.seekBar.max = String(duration);
+  elements.desktopSeekBar.max = String(duration);
   elements.elapsedTime.textContent = formatTime(current);
   elements.durationTime.textContent = formatTime(duration);
+  elements.desktopElapsed.textContent = formatTime(current);
+  elements.desktopDuration.textContent = formatTime(duration);
+  elements.miniProgressValue.style.width = duration > 0 ? `${Math.min(100, Math.max(0, current / duration * 100))}%` : "0%";
+  updateMediaPosition();
   updateButtonState();
 }
 
@@ -838,19 +1261,17 @@ function downloadStateFor(song) {
 function updatePlaybackUI() {
   const song = currentSong();
   elements.miniTitle.textContent = song ? song.title : "選擇一首歌曲";
-  elements.miniSubtitle.textContent = song
-    ? `${isLocalSong(song) ? "本機匯入" : "線上歌單"} · ${elements.audio.ended ? "播放佇列已結束" : elements.audio.paused ? "已暫停" : "正在播放"}`
-    : "音樂庫";
-  elements.fullTitle.textContent = song ? "正在播放" : "播放頁";
+  elements.miniSubtitle.textContent = song?.artist || "";
+  elements.fullTitle.textContent = song ? sourceLabel(song) : "音樂庫";
   elements.fullTrackTitle.textContent = song ? song.title : "尚未選擇歌曲";
-  if (!song) elements.fullTrackSource.textContent = "選擇音樂庫中的歌曲開始播放";
-  else if (isLocalSong(song)) elements.fullTrackSource.textContent = `本機匯入 · ${song.originalFileName}`;
-  else elements.fullTrackSource.textContent = song.sourceRemoved ? "線上來源已移除 · 已保存的歌曲仍可播放" : `線上歌單 · ${downloadStateFor(song).label}`;
+  elements.fullTrackSource.textContent = song?.artist || "";
   applyCover(elements.miniCover, song);
   applyCover(elements.fullCover, song);
   updateTimeline();
   updateCurrentIndicators();
   updateModeControls();
+  updateMediaSession();
+  renderQueue();
 }
 
 function sourceLabel(song) {
@@ -873,31 +1294,37 @@ function createSongRow(song) {
   if (song.id === currentSongId) select.setAttribute("aria-current", "true");
   const copy = document.createElement("span");
   copy.className = "song-copy";
+  const heading = document.createElement("span");
+  heading.className = "song-heading";
   const title = document.createElement("span");
   title.className = "song-name";
   title.textContent = song.title;
-  const sub = document.createElement("span");
-  sub.className = "song-filename";
-  sub.textContent = isLocalSong(song) ? song.originalFileName : (song.sourceRemoved ? "此歌曲已從線上歌單移除" : "");
-  const state = document.createElement("span");
-  state.className = "song-state";
-  state.hidden = song.id !== currentSongId;
-  state.textContent = song.id === currentSongId ? (elements.audio.paused ? "已暫停" : "播放中") : "";
+  const artist = document.createElement("span");
+  artist.className = "song-artist";
+  artist.textContent = song.artist || "";
   const meta = document.createElement("span");
   meta.className = "song-meta";
-  const origin = document.createElement("span");
-  origin.className = `song-origin${song.sourceRemoved ? " source-removed" : ""}`;
-  origin.textContent = sourceLabel(song);
-  meta.append(origin);
-  if (isOnlineSong(song)) {
+  if (isLocalSong(song)) {
+    const origin = document.createElement("span");
+    origin.className = "song-meta-icon";
+    origin.title = "本機匯入";
+    origin.setAttribute("role", "img");
+    origin.setAttribute("aria-label", "本機匯入");
+    origin.append(makeIcon("device"));
+    meta.append(origin);
+  } else if (isOnlineSong(song)) {
     const download = document.createElement("span");
     const downloadState = downloadStateFor(song);
-    download.className = "download-state";
+    download.className = "song-meta-icon download-state";
     download.dataset.state = downloadState.state;
-    download.textContent = downloadState.label;
+    download.title = downloadState.label;
+    download.setAttribute("role", "img");
+    download.setAttribute("aria-label", downloadState.label);
+    download.append(makeIcon(isDownloaded(song) ? "check" : "cloud"));
     meta.append(download);
   }
-  copy.append(title, sub, state, meta);
+  heading.append(title, meta);
+  copy.append(heading, artist);
   const indicator = document.createElement("span");
   indicator.className = "current-indicator";
   indicator.hidden = song.id !== currentSongId;
@@ -923,7 +1350,18 @@ function renderLibrary(focusRename = false) {
   elements.songList.replaceChildren(...visible.map(createSongRow));
   elements.songCount.textContent = `${songs.length} 首歌曲`;
   elements.visibleCount.textContent = query ? `顯示 ${visible.length} 首` : "";
-  elements.emptyState.hidden = songs.length > 0;
+  const isEmpty = songs.length === 0;
+  const showLibraryError = Boolean(libraryLoadError) && !libraryLoading;
+  elements.emptyState.hidden = !isEmpty && !showLibraryError;
+  elements.emptyState.classList.toggle("is-error", showLibraryError);
+  if (isEmpty || showLibraryError) {
+    elements.emptyStateTitle.textContent = libraryLoading && isEmpty ? "載入音樂庫…" : libraryLoadError ? "音樂庫載入不完整" : "目前沒有歌曲";
+    elements.emptyStateDescription.textContent = libraryLoading
+      ? "正在讀取此裝置歌曲與線上歌單。"
+      : libraryLoadError || "在專案的 songs.json 加入線上歌曲，或從右上角「＋」匯入本機音訊。";
+    elements.emptyRefreshButton.textContent = libraryLoading ? "載入中…" : libraryLoadError ? "重試載入" : "重新載入音樂庫";
+  }
+  elements.emptyRefreshButton.disabled = libraryLoading;
   elements.noResults.hidden = songs.length === 0 || visible.length > 0;
   elements.clearSearchButton.hidden = !elements.search.value;
   updatePlaybackUI();
@@ -932,6 +1370,31 @@ function renderLibrary(focusRename = false) {
 
 function openDialog(dialog) { if (!dialog.open) dialog.showModal(); }
 function closeDialog(dialog) { if (dialog.open) dialog.close(); }
+
+function openQueueDialog(trigger) {
+  if (elements.queueDialog.open) return;
+  queueReturnFocus = trigger;
+  queuePreviousOverflow = document.body.style.overflow;
+  document.body.style.overflow = "hidden";
+  document.body.classList.add("queue-open");
+  renderQueue();
+  try {
+    elements.queueDialog.showModal();
+    elements.closeQueueButton.focus({ preventScroll: true });
+  } catch (error) {
+    document.body.classList.remove("queue-open");
+    document.body.style.overflow = queuePreviousOverflow;
+    setStatus("目前瀏覽器無法開啟播放佇列。", "error");
+  }
+}
+
+function restoreQueueFocus() {
+  document.body.classList.remove("queue-open");
+  document.body.style.overflow = queuePreviousOverflow;
+  const trigger = queueReturnFocus;
+  queueReturnFocus = null;
+  if (trigger?.isConnected) requestAnimationFrame(() => trigger.focus({ preventScroll: true }));
+}
 
 function addMenuAction({ label, icon, onClick, disabled = false, danger = false, note = "" }) {
   const button = document.createElement("button");
@@ -958,8 +1421,12 @@ function openTrackMenu(id) {
   actionSongId = id;
   elements.trackMenuTitle.textContent = song.title;
   elements.trackMenuSource.textContent = sourceLabel(song);
+  elements.trackOriginalFilename.textContent = song.originalFileName ? `原始檔名：${song.originalFileName}` : "";
   elements.trackActionList.replaceChildren();
-  addMenuAction({ label: "修改歌名", icon: "image", onClick: beginRename });
+  addMenuAction({ label: "修改歌名", icon: "edit", onClick: beginRename });
+  addMenuAction({ label: "修改歌手", icon: "artist", onClick: beginArtistEdit });
+  addMenuAction({ label: "播放下一首", icon: "next", onClick: () => { closeDialog(elements.trackMenuDialog); addToManualQueue(id, true); } });
+  addMenuAction({ label: "加入播放佇列", icon: "queue", onClick: () => { closeDialog(elements.trackMenuDialog); addToManualQueue(id); } });
   addMenuAction({ label: "更換封面", icon: "image", onClick: beginCoverChange });
   if (song.customCoverBlob instanceof Blob) addMenuAction({ label: "移除自訂封面", icon: "close", onClick: () => removeCustomCover(id) });
   if (isOnlineSong(song)) {
@@ -972,10 +1439,28 @@ function openTrackMenu(id) {
       onClick: () => { closeDialog(elements.trackMenuDialog); downloadSong(id); }
     });
     if (isDownloaded(song)) addMenuAction({ label: "移除離線檔案", icon: "trash", danger: true, onClick: () => removeOfflineAudio(id) });
+    addMenuAction({ label: "從此裝置的音樂庫移除", icon: "trash", danger: true, onClick: () => removeOnlineSong(id) });
   } else {
     addMenuAction({ label: "刪除本機歌曲", icon: "trash", danger: true, onClick: () => deleteLocalSong(id) });
   }
   openDialog(elements.trackMenuDialog);
+}
+
+async function beginArtistEdit() {
+  const id = actionSongId;
+  closeDialog(elements.trackMenuDialog);
+  const song = bySongId(id);
+  if (!song) return;
+  const value = window.prompt(`修改「${song.title}」的歌手`, song.artist || "");
+  if (value === null) return;
+  const artist = value.trim().slice(0, MAX_TITLE_LENGTH);
+  const changed = isOnlineSong(song) ? { ...song, artist, customArtist: artist } : { ...song, artist };
+  try {
+    await writeRecord(changed);
+    replaceSong(changed);
+    renderLibrary();
+    setStatus("歌手資訊已保存。", "success");
+  } catch (error) { setStatus(storageErrorMessage(error), "error"); }
 }
 
 function beginRename() {
@@ -1038,24 +1523,118 @@ function replaceSong(updated) {
   catalogSongs = catalogSongs.map((song) => song.id === updated.id ? updated : song);
 }
 
+function removeQueueReferences(id) {
+  manualQueue = manualQueue.filter((item) => item !== id);
+  playbackHistory = playbackHistory.filter((item) => item !== id);
+  shuffleUpcoming = shuffleUpcoming.filter((item) => item !== id);
+  shuffleHistory = shuffleHistory.filter((item) => item !== id);
+  persistManualQueue();
+}
+
+function selectFollowingSong(index, shouldPlay) {
+  if (nextManualSong(shouldPlay)) return true;
+  if (shuffleEnabled && !shuffleUpcoming.length && loopMode === "all" && songs.length > 1) shuffleUpcoming = shuffled(songIds());
+  const candidates = shuffleEnabled
+    ? [...shuffleUpcoming]
+    : [...songs.slice(Math.max(0, index)), ...(loopMode === "all" ? songs.slice(0, Math.max(0, index)) : [])].map((song) => song.id);
+  let skippedOffline = false;
+  for (const id of candidates) {
+    const candidate = bySongId(id);
+    if (!candidate || !isPlayableNow(candidate, true)) { skippedOffline = true; continue; }
+    if (shuffleEnabled) shuffleUpcoming = shuffleUpcoming.filter((queuedId) => queuedId !== id);
+    selectSong(id, shouldPlay, "auto");
+    if (skippedOffline) setStatus("部分歌曲尚未下載，已略過並繼續播放。", "error");
+    return true;
+  }
+  clearCurrentPlayback();
+  if (skippedOffline) setStatus("佇列中的歌曲尚未下載，已停止播放。", "error");
+  return false;
+}
+
 async function deleteLocalSong(id) {
   const song = bySongId(id);
   closeDialog(elements.trackMenuDialog);
-  if (!song || !window.confirm(`確定要刪除「${song.title}」嗎？此動作無法復原。`)) return;
+  if (!song || !window.confirm(`確定要刪除本機歌曲「${song.title}」嗎？這會刪除音訊、專屬封面和歌曲資料，且無法復原。`)) return;
+  const oldIndex = songs.findIndex((item) => item.id === id);
+  const wasCurrent = currentSongId === id;
+  const shouldPlay = wasCurrent && !elements.audio.paused;
   try {
     await deleteRecord(id);
-    if (currentSongId === id) clearCurrentPlayback();
+    removeQueueReferences(id);
     const cover = coverObjectUrls.get(id);
     if (cover) URL.revokeObjectURL(cover.url);
     coverObjectUrls.delete(id);
     localSongs = localSongs.filter((item) => item.id !== id);
     songs = songs.filter((item) => item.id !== id);
-    shuffleUpcoming = shuffleUpcoming.filter((item) => item !== id);
-    shuffleHistory = shuffleHistory.filter((item) => item !== id);
+    if (wasCurrent) clearCurrentPlayback();
     reconcileShuffleQueue();
     renderLibrary();
+    if (wasCurrent) selectFollowingSong(Math.min(oldIndex, songs.length), shouldPlay);
     setStatus(`已刪除「${song.title}」。`, "success");
   } catch (error) { setStatus(storageErrorMessage(error), "error"); }
+}
+
+async function removeOnlineSong(id) {
+  const song = bySongId(id);
+  closeDialog(elements.trackMenuDialog);
+  if (!song || !isOnlineSong(song)) return;
+  if (!window.confirm(`確定要從此裝置的音樂庫移除「${song.title}」嗎？這會清除本機下載並隱藏此歌曲；GitHub 原始檔仍會保留。`)) return;
+  const oldIndex = songs.findIndex((item) => item.id === id);
+  const wasCurrent = currentSongId === id;
+  const shouldPlay = wasCurrent && !elements.audio.paused;
+  const updated = { ...song, hiddenFromLibrary: true, userRestored: false, audioBlob: null, downloadVersion: null, downloadedAt: null, downloadedTitle: null, downloadedAudioUrl: null, downloadedCoverBlob: null, downloadedCoverUrl: null };
+  try {
+    await writeRecord(updated);
+    removeQueueReferences(id);
+    remoteRecords.set(updated.remoteId, updated);
+    catalogSongs = catalogSongs.map((item) => item.id === id ? updated : item);
+    songs = songs.filter((item) => item.id !== id);
+    downloadStates.delete(id);
+    if (wasCurrent) clearCurrentPlayback();
+    composeSongs();
+    renderLibrary();
+    if (wasCurrent) selectFollowingSong(Math.min(oldIndex, songs.length), shouldPlay);
+    setStatus(`已從此裝置移除「${song.title}」；GitHub 原始檔仍保留。`, "success");
+  } catch (error) { setStatus(storageErrorMessage(error), "error"); }
+}
+
+function renderRemovedSongs() {
+  const removed = [...remoteRecords.values()].filter((song) => song.hiddenFromLibrary).sort((a, b) => a.title.localeCompare(b.title));
+  elements.removedSongList.replaceChildren();
+  if (!removed.length) {
+    const empty = document.createElement("p");
+    empty.className = "queue-empty";
+    empty.textContent = "沒有已移除的歌曲";
+    elements.removedSongList.append(empty);
+    return;
+  }
+  for (const song of removed) {
+    const row = document.createElement("div");
+    row.className = "removed-song-row";
+    const title = document.createElement("span");
+    title.className = "queue-song-title";
+    title.textContent = song.title;
+    const restore = document.createElement("button");
+    restore.className = "button button-secondary";
+    restore.type = "button";
+    restore.append(makeIcon("restore"), document.createTextNode("還原"));
+    restore.addEventListener("click", async () => {
+      const updated = { ...song, hiddenFromLibrary: false, userRestored: true };
+      try {
+        await writeRecord(updated);
+        remoteRecords.set(updated.remoteId, updated);
+        if (catalogSongs.some((item) => item.id === updated.id)) {
+          catalogSongs = catalogSongs.map((item) => item.id === updated.id ? { ...item, ...updated, sourceRemoved: false } : item);
+        } else catalogSongs.push({ ...updated, sourceRemoved: true });
+        composeSongs();
+        renderLibrary();
+        renderRemovedSongs();
+        setStatus(`已還原「${updated.title}」；需要離線播放時請重新下載。`, "success");
+      } catch (error) { setStatus(storageErrorMessage(error), "error"); }
+    });
+    row.append(title, restore);
+    elements.removedSongList.append(row);
+  }
 }
 
 function beginCoverChange() {
@@ -1090,14 +1669,15 @@ async function cropCoverImage(file) {
     const width = image.width || image.naturalWidth;
     const height = image.height || image.naturalHeight;
     if (!width || !height) throw new Error("圖片尺寸無效，無法製作封面。");
-    const crop = Math.min(width, height);
-    const size = Math.min(COVER_LIMIT, crop);
+    const scale = Math.min(1, COVER_LIMIT / Math.max(width, height));
+    const scaledWidth = Math.max(1, Math.round(width * scale));
+    const scaledHeight = Math.max(1, Math.round(height * scale));
     const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
-    const context = canvas.getContext("2d", { alpha: false });
+    canvas.width = scaledWidth;
+    canvas.height = scaledHeight;
+    const context = canvas.getContext("2d", { alpha: true });
     if (!context) throw new Error("瀏覽器無法建立圖片預覽。");
-    context.drawImage(image, (width - crop) / 2, (height - crop) / 2, crop, crop, 0, 0, size, size);
+    context.drawImage(image, 0, 0, scaledWidth, scaledHeight);
     let result = await canvasToBlob(canvas, "image/webp", .88);
     if (!result) result = await canvasToBlob(canvas, "image/jpeg", .9);
     if (!result) throw new Error("圖片縮放失敗，請改用其他圖片。");
@@ -1206,10 +1786,15 @@ async function downloadSong(id) {
   setStatus(`正在下載「${song.title}」…`, "working");
   try {
     const [audioBlob, downloadedCoverBlob] = await Promise.all([fetchRemoteAudio(song), fetchRemoteCover(song)]);
+    const latestSong = bySongId(id);
+    if (!latestSong || !isOnlineSong(latestSong) || latestSong.hiddenFromLibrary) {
+      downloadStates.delete(id);
+      return false;
+    }
     // The old record (including its audio Blob) is replaced only after the
     // entire new payload has been fetched and this transaction commits.
     const updated = {
-      ...song,
+      ...latestSong,
       audioBlob,
       downloadVersion: song.version,
       downloadedAt: new Date().toISOString(),
@@ -1236,7 +1821,7 @@ async function downloadSong(id) {
 async function removeOfflineAudio(id) {
   closeDialog(elements.trackMenuDialog);
   const song = bySongId(id);
-  if (!isDownloaded(song)) return;
+  if (!isDownloaded(song) || !window.confirm(`確定要移除「${song.title}」的離線檔案嗎？歌曲仍會保留在音樂庫。`)) return;
   try {
     const updated = { ...song, audioBlob: null, downloadVersion: null, downloadedAt: null, downloadedTitle: null, downloadedAudioUrl: null, downloadedCoverBlob: null, downloadedCoverUrl: null };
     await writeRecord(updated);
@@ -1249,7 +1834,7 @@ async function removeOfflineAudio(id) {
 
 async function downloadAllSongs() {
   if (downloadingAll) return;
-  const candidates = catalogSongs.filter((song) => !isCurrentDownload(song));
+  const candidates = catalogSongs.filter((song) => !song.hiddenFromLibrary && !isCurrentDownload(song));
   if (!candidates.length) { setStatus("線上歌單中的歌曲都已下載至目前版本。", "success"); return; }
   downloadingAll = true;
   elements.downloadAllButton.disabled = true;
@@ -1435,6 +2020,8 @@ function updateOfflineUI() {
 }
 
 async function initializeServiceWorker() {
+  if (serviceWorkerInitialized) return;
+  serviceWorkerInitialized = true;
   if (!("serviceWorker" in navigator)) {
     elements.offlineSupportNote.textContent += " 此瀏覽器不支援 Service Worker。";
     return;
@@ -1477,6 +2064,9 @@ function applyWaitingUpdate() {
 }
 
 async function initialize() {
+  if (libraryLoading) return;
+  libraryLoading = true;
+  libraryLoadError = "";
   updateModeControls();
   updatePlaybackUI();
   renderLibrary();
@@ -1508,9 +2098,23 @@ async function initialize() {
     }
   } catch (error) {
     database = null;
-    setStatus(`無法讀取此裝置的音樂庫：${error.message || storageErrorMessage(error)} 線上播放仍可嘗試；下載與本機保存暫不可用。`, "error");
+    const message = `無法讀取此裝置的音樂庫：${error.message || storageErrorMessage(error)} 線上播放仍可嘗試；下載與本機保存暫不可用。`;
+    libraryLoadError = message;
+    setStatus(message, "error");
   }
-  await refreshCatalog({ quiet: true });
+  const catalogLoaded = await refreshCatalog({ quiet: true });
+  if (!catalogLoaded && !songs.length && !libraryLoadError) {
+    libraryLoadError = "線上歌曲清單載入失敗。請檢查網路連線後重試。";
+  }
+  libraryLoading = false;
+  renderLibrary();
+}
+
+async function retryLibraryLoad() {
+  if (libraryLoading) return;
+  elements.emptyRefreshButton.disabled = true;
+  try { await initialize(); }
+  finally { elements.emptyRefreshButton.disabled = libraryLoading; }
 }
 
 function handleAudioError() {
@@ -1540,18 +2144,36 @@ function setPlaybackStatus(message) { elements.playbackStatus.textContent = mess
 function setupEventListeners() {
   elements.quickMenuButton.addEventListener("click", () => openDialog(elements.quickActionsDialog));
   elements.closeQuickActionsButton.addEventListener("click", () => closeDialog(elements.quickActionsDialog));
+  elements.removedSongsButton.addEventListener("click", () => { closeDialog(elements.quickActionsDialog); renderRemovedSongs(); openDialog(elements.removedSongsDialog); });
+  elements.closeRemovedSongsButton.addEventListener("click", () => closeDialog(elements.removedSongsDialog));
   elements.importButton.addEventListener("click", () => { closeDialog(elements.quickActionsDialog); elements.audioFiles.click(); });
   elements.audioFiles.addEventListener("change", (event) => importSelectedFiles(event.target.files));
   elements.downloadAllButton.addEventListener("click", () => { closeDialog(elements.quickActionsDialog); downloadAllSongs(); });
   elements.refreshPlaylistButton.addEventListener("click", () => { closeDialog(elements.quickActionsDialog); refreshCatalog(); });
-  elements.emptyRefreshButton.addEventListener("click", refreshCatalog);
+  elements.emptyRefreshButton.addEventListener("click", retryLibraryLoad);
   elements.search.addEventListener("input", () => { updateSearchControls(); renderLibrary(); });
   elements.searchForm.addEventListener("submit", (event) => event.preventDefault());
   elements.clearSearchButton.addEventListener("click", () => { elements.search.value = ""; updateSearchControls(); renderLibrary(); elements.search.focus(); });
   elements.resetSearchButton.addEventListener("click", () => { elements.search.value = ""; updateSearchControls(); renderLibrary(); elements.search.focus(); });
   elements.miniTrack.addEventListener("click", () => openDialog(elements.playerDialog));
   elements.miniPlayButton.addEventListener("click", togglePlayback);
-  elements.miniNextButton.addEventListener("click", playNext);
+  elements.desktopShuffleButton.addEventListener("click", () => elements.shuffleButton.click());
+  elements.desktopRepeatButton.addEventListener("click", () => elements.repeatButton.click());
+  elements.desktopPreviousButton.addEventListener("click", playPrevious);
+  elements.desktopPlayButton.addEventListener("click", togglePlayback);
+  elements.desktopNextButton.addEventListener("click", playNext);
+  elements.queueButton.addEventListener("click", () => openQueueDialog(elements.queueButton));
+  elements.fullQueueButton.addEventListener("click", () => {
+    if (window.matchMedia?.("(min-width: 900px)").matches) {
+      closeDialog(elements.playerDialog);
+      openQueueDialog(elements.queueButton);
+    } else openQueueDialog(elements.fullQueueButton);
+  });
+  elements.closeQueueButton.addEventListener("click", () => closeDialog(elements.queueDialog));
+  elements.queueDialog.addEventListener("close", restoreQueueFocus);
+  elements.queueContent.addEventListener("pointermove", updateQueueDrag);
+  elements.queueContent.addEventListener("pointerup", (event) => finishQueueDrag(event));
+  elements.queueContent.addEventListener("pointercancel", (event) => finishQueueDrag(event, false));
   elements.closePlayerButton.addEventListener("click", () => closeDialog(elements.playerDialog));
   elements.playButton.addEventListener("click", togglePlayback);
   elements.previousButton.addEventListener("click", playPrevious);
@@ -1575,6 +2197,11 @@ function setupEventListeners() {
     elements.elapsedTime.textContent = formatTime(time);
     if (Number.isFinite(elements.audio.duration)) elements.audio.currentTime = time;
   });
+  elements.desktopSeekBar.addEventListener("input", () => {
+    const time = Number(elements.desktopSeekBar.value);
+    elements.desktopElapsed.textContent = formatTime(time);
+    if (Number.isFinite(elements.audio.duration)) elements.audio.currentTime = time;
+  });
   elements.infoButton.addEventListener("click", () => openDialog(elements.infoDialog));
   elements.closeInfoButton.addEventListener("click", () => closeDialog(elements.infoDialog));
   elements.infoDoneButton.addEventListener("click", () => closeDialog(elements.infoDialog));
@@ -1595,6 +2222,7 @@ function setupEventListeners() {
     if (!elements.audio.ended && currentSongId) setPlaybackStatus("已暫停");
   });
   elements.audio.addEventListener("ended", handleNaturalEnd);
+  elements.audio.addEventListener("seeked", updateMediaPosition);
   elements.audio.addEventListener("error", handleAudioError);
   window.addEventListener("online", () => { updateOfflineUI(); refreshCatalog({ quiet: true }); });
   window.addEventListener("offline", updateOfflineUI);
@@ -1608,4 +2236,5 @@ function setupEventListeners() {
 
 setupEventListeners();
 updateOfflineUI();
+setupMediaSession();
 initialize();

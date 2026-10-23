@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#f6f2eb">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="音樂庫">
@@ -11,8 +12,8 @@
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="apple-touch-icon" href="./icons/app-icon-180.png?v=2">
     <link rel="icon" href="./icons/app-icon.svg?v=2" type="image/svg+xml">
-    <link rel="stylesheet" href="./style.css">
-    <script src="./app.js" defer></script>
+    <link rel="stylesheet" href="./style.css?v=13">
+    <script src="./app.js?v=13" defer></script>
   </head>
   <body>
     <main class="app-shell">
@@ -60,12 +61,12 @@
 
         <div class="song-list" id="songList" aria-label="音樂庫歌曲列表"></div>
 
-        <section class="empty-state" id="emptyState" hidden>
+        <section class="empty-state" id="emptyState" aria-live="polite" hidden>
           <div class="empty-copy">
-            <h2>目前沒有歌曲</h2>
-            <p>在專案的 <code>songs.json</code> 加入線上歌曲，或從右上角「＋」匯入本機音訊。</p>
+            <h2 id="emptyStateTitle">目前沒有歌曲</h2>
+            <p id="emptyStateDescription">在專案的 <code>songs.json</code> 加入線上歌曲，或從右上角「＋」匯入本機音訊。</p>
           </div>
-          <button class="quiet-button" id="emptyRefreshButton" type="button">重新讀取線上歌單</button>
+          <button class="quiet-button" id="emptyRefreshButton" type="button">重新載入音樂庫</button>
         </section>
 
         <section class="no-results" id="noResults" hidden>
@@ -83,13 +84,27 @@
           <span class="mini-subtitle" id="miniSubtitle">音樂庫</span>
         </span>
       </button>
-      <button class="mini-control" id="miniPlayButton" type="button" aria-label="播放" title="播放" disabled>
-        <svg id="miniPlayIcon" class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
-      </button>
-      <button class="mini-control" id="miniNextButton" type="button" aria-label="下一首" title="下一首" disabled>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14l10-7zM18 5v14"></path></svg>
-      </button>
+      <div class="desktop-playback-controls" role="group" aria-label="播放控制">
+        <div class="desktop-transport">
+          <button class="mini-control desktop-mode" id="desktopShuffleButton" type="button" aria-label="隨機播放，關閉" aria-pressed="false" title="隨機播放"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h2.5c4.2 0 8.8 10 13 10H21"></path><path d="m18 14 3 3-3 3"></path><path d="M3 17h2.5c4.2 0 8.8-10 13-10H21"></path><path d="m18 4 3 3-3 3"></path></svg></button>
+          <button class="mini-control" id="desktopPreviousButton" type="button" aria-label="上一首" title="上一首" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14L8 12zM6 5v14"></path></svg></button>
+          <button class="mini-control desktop-play" id="desktopPlayButton" type="button" aria-label="播放" title="播放" disabled><svg id="desktopPlayIcon" class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg></button>
+          <button class="mini-control" id="desktopNextButton" type="button" aria-label="下一首" title="下一首" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14l10-7zM18 5v14"></path></svg></button>
+          <button class="mini-control desktop-mode desktop-repeat" id="desktopRepeatButton" type="button" aria-label="循環模式：不循環" aria-pressed="false" title="循環模式：不循環"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2 21 6l-4 4"></path><path d="M3 11V9a3 3 0 0 1 3-3h15"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v2a3 3 0 0 1-3 3H3"></path></svg></button>
+        </div>
+        <div class="desktop-timeline"><span id="desktopElapsed">0:00</span><label class="visually-hidden" for="desktopSeekBar">播放進度</label><input id="desktopSeekBar" type="range" min="0" max="0" step="0.1" value="0" disabled><span id="desktopDuration">0:00</span></div>
+      </div>
+      <button class="mini-control mobile-play" id="miniPlayButton" type="button" aria-label="播放" title="播放" disabled><svg id="miniPlayIcon" class="control-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg></button>
+      <button class="icon-button queue-toggle" id="queueButton" type="button" aria-label="開啟播放佇列" aria-haspopup="dialog" title="播放佇列"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h7"></path><path d="m17 15 3 3-3 3"></path></svg></button>
+      <div class="mini-progress" aria-hidden="true"><span id="miniProgressValue"></span></div>
     </footer>
+
+    <dialog class="queue-dialog" id="queueDialog" aria-labelledby="queueTitle">
+      <div class="queue-shell">
+        <header class="queue-header"><div><p class="eyebrow">播放順序</p><h2 id="queueTitle">播放佇列</h2></div><button class="icon-button" id="closeQueueButton" type="button" aria-label="關閉播放佇列"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button></header>
+        <div class="queue-content" id="queueContent"></div>
+      </div>
+    </dialog>
 
     <dialog class="player-dialog" id="playerDialog" aria-labelledby="fullTitle">
       <div class="player-dialog-shell">
@@ -98,7 +113,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
           </button>
           <div class="dialog-heading">
-            <p class="eyebrow">播放中</p>
+            <p class="eyebrow">播放來源</p>
             <h2 id="fullTitle">正在播放</h2>
           </div>
           <span class="header-balance" aria-hidden="true"></span>
@@ -135,7 +150,7 @@
               <span class="mode-caption" id="repeatCaption">不循環</span>
             </button>
           </div>
-          <p class="playback-status" id="playbackStatus" aria-live="polite">準備就緒</p>
+          <div class="full-player-footer"><p class="playback-status" id="playbackStatus" aria-live="polite">準備就緒</p><button class="icon-button full-queue-button" id="fullQueueButton" type="button" aria-label="開啟播放佇列" aria-haspopup="dialog" title="播放佇列"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h7"></path><path d="m17 15 3 3-3 3"></path></svg></button></div>
         </div>
       </div>
     </dialog>
@@ -146,7 +161,14 @@
         <button class="action-item" id="importButton" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v5h14v-5"></path></svg><span>匯入本機音訊</span></button>
         <button class="action-item" id="downloadAllButton" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 17v3h16v-3"></path></svg><span>全部下載供離線收聽</span></button>
         <button class="action-item" id="refreshPlaylistButton" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"></path><path d="M5.6 9a7 7 0 0 1 11.9-2L20 12M4 12l2.5 5a7 7 0 0 0 11.9-2"></path></svg><span>重新讀取線上歌單</span></button>
+        <button class="action-item" id="removedSongsButton" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 7V4h10v3M6 7l1 13h10l1-13M10 11v5M14 11v5"></path></svg><span>已移除歌曲</span></button>
       </div>
+    </dialog>
+
+    <dialog class="small-dialog" id="removedSongsDialog" aria-labelledby="removedSongsTitle">
+      <div class="small-dialog-head"><h2 id="removedSongsTitle">已移除歌曲</h2><button class="icon-button" id="closeRemovedSongsButton" type="button" aria-label="關閉已移除歌曲"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button></div>
+      <p class="preview-help">還原後會重新顯示於音樂庫；若離線播放，請重新下載。</p>
+      <div class="removed-song-list" id="removedSongList"></div>
     </dialog>
 
     <dialog class="small-dialog" id="infoDialog" aria-labelledby="infoTitle">
@@ -154,6 +176,7 @@
       <div class="info-copy">
         <p>本機匯入與離線歌曲保存在此裝置的播放器內，不會加入 Apple Music 或「檔案」App。清除網站資料可能刪除下載內容，可以重新下載。</p>
         <p>線上歌單透過此專案的 <code>songs.json</code> 載入。GitHub Pages 上的線上音訊可被取得網址的人存取。</p>
+        <p>播放佇列、播放模式、自訂歌名與歌手保存在此裝置。較早版本已裁切保存的封面無法還原邊緣，請重新選取原始圖片。</p>
         <p id="offlineSupportNote" class="offline-note">離線播放只適用於已下載並保存到此裝置的歌曲。</p>
       </div>
       <div class="update-actions"><span id="updateState" class="offline-note" aria-live="polite"></span><button class="button button-secondary" id="applyUpdateButton" type="button" hidden>套用播放器更新</button></div>
@@ -165,13 +188,14 @@
         <div class="menu-track-title"><p class="eyebrow" id="trackMenuSource">歌曲選項</p><h2 id="trackMenuTitle">歌曲</h2></div>
         <button class="icon-button" id="closeTrackMenuButton" type="button" aria-label="關閉歌曲選項"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
       </div>
+      <p class="track-original-name" id="trackOriginalFilename"></p>
       <div class="action-list" id="trackActionList"></div>
     </dialog>
 
     <dialog class="small-dialog cover-preview-dialog" id="coverPreviewDialog" aria-labelledby="coverPreviewTitle">
       <div class="small-dialog-head"><h2 id="coverPreviewTitle">自訂封面預覽</h2><button class="icon-button" id="closeCoverPreviewButton" type="button" aria-label="取消更換封面"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button></div>
-      <p class="preview-help">圖片會置中裁切為正方形，並縮放到最多 1024 × 1024。</p>
-      <img class="cover-preview-image" id="coverPreviewImage" alt="正方形封面預覽">
+      <p class="preview-help">完整圖片會保留原始比例，縮放到最多 1024 × 1024；較長的一邊會完整顯示。</p>
+      <img class="cover-preview-image" id="coverPreviewImage" alt="完整封面預覽">
       <p class="cover-error" id="coverPreviewError" role="status" aria-live="polite"></p>
       <div class="preview-actions"><button class="button button-secondary" id="cancelCoverButton" type="button">取消</button><button class="button button-primary" id="confirmCoverButton" type="button" disabled>保存封面</button></div>
     </dialog>
